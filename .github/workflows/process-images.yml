@@ -48,44 +48,79 @@ jobs:
         run: |
           node process-images.js ${{ steps.changed.outputs.FILES }}
 
-      - name: Update files.json
+      - name: Remove orphaned webp files
         if: steps.changed.outputs.FILES != ''
         run: |
           node <<'EOF'
           const fs = require('fs');
           const path = require('path');
 
-          const FILE_PATH = path.join(process.cwd(), 'images', 'files.json');
+          const originalsDir = path.join(process.cwd(), 'originals');
+          const imagesDir = path.join(process.cwd(), 'images');
 
-          if (!fs.existsSync(FILE_PATH)) {
-            fs.writeFileSync(FILE_PATH, JSON.stringify({}, null, 2));
+          if (!fs.existsSync(imagesDir)) {
+            fs.mkdirSync(imagesDir, { recursive: true });
           }
 
-          const data = JSON.parse(fs.readFileSync(FILE_PATH, 'utf-8'));
+          const originalBaseNames = new Set();
+          if (fs.existsSync(originalsDir)) {
+            const originalFiles = fs.readdirSync(originalsDir);
+            for (const file of originalFiles) {
+              const ext = path.extname(file);
+              const base = path.basename(file, ext);
+              originalBaseNames.add(base);
+            }
+          }
 
-          const now = Date.now();
+          const imageFiles = fs.readdirSync(imagesDir).filter(f => f.endsWith('.webp'));
 
-          const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-          const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
-          const ownerLower = owner.toLowerCase();
+          for (const file of imageFiles) {
+            const base = path.basename(file, '.webp');
+            if (!originalBaseNames.has(base)) {
+              const target = path.join(imagesDir, file);
+              fs.unlinkSync(target);
+              console.log('Removed orphan webp:', file);
+            }
+          }
+          EOF
 
-          const baseUrl = `https://${ownerLower}.github.io/${repo}`;
+      - name: Rebuild files.json from current images directory
+        if: steps.changed.outputs.FILES != ''
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          const repoFull = process.env.GITHUB_REPOSITORY || '';
+          const [owner, repo] = repoFull.split('/');
+          const ownerLower = (owner || '').toLowerCase();
 
           const imagesDir = path.join(process.cwd(), 'images');
-          const files = fs.readdirSync(imagesDir).filter(f => f.endsWith('.webp'));
+          const filePath = path.join(imagesDir, 'files.json');
 
-          files.forEach((file, index) => {
-            const key = now + index;
+          if (!fs.existsSync(imagesDir)) {
+            fs.mkdirSync(imagesDir, { recursive: true });
+          }
 
-            data[key] = {
-              path: `${baseUrl}/images/${file}`,
-              name: file || `${now}.webp`,
+          const files = fs
+            .readdirSync(imagesDir)
+            .filter(f => f.endsWith('.webp'))
+            .sort((a, b) => a.localeCompare(b));
+
+          const data = {};
+
+          for (const file of files) {
+            const base = path.basename(file, '.webp');
+
+            data[base] = {
+              path: `https://${ownerLower}.github.io/${repo}/images/${file}`,
+              name: file,
               meta: {}
             };
-          });
+          }
 
-          fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2));
-          console.log("files.json updated with GitHub Pages URLs");
+          fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+          console.log('files.json rebuilt from actual images directory');
           EOF
 
       - name: Commit processed images + metadata
@@ -99,6 +134,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Add processed images + metadata"
+            git commit -m "Sync processed images + metadata"
             git push
           fi
