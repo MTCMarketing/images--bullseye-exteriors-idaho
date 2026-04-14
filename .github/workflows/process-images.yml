@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: process-images-${{ github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   process:
     runs-on: ubuntu-latest
@@ -32,19 +36,67 @@ jobs:
       - name: Get changed files
         id: changed
         run: |
-          echo "FILES<<EOF" >> $GITHUB_OUTPUT
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} | tr '\n' ' ' >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | tr '\n' ' ')
+          echo "FILES=$FILES" >> $GITHUB_OUTPUT
+
+      - name: Skip if no relevant files
+        if: steps.changed.outputs.FILES == ''
+        run: echo "No changed files. Skipping."
 
       - name: Convert only changed images
+        if: steps.changed.outputs.FILES != ''
         run: |
           node process-images.js ${{ steps.changed.outputs.FILES }}
 
-      - name: Commit processed images
+      # 🔥 NEW STEP: update images/files.json
+      - name: Update files.json
+        if: steps.changed.outputs.FILES != ''
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          const FILE_PATH = path.join(process.cwd(), 'images', 'files.json');
+
+          // ensure file exists
+          if (!fs.existsSync(FILE_PATH)) {
+            fs.writeFileSync(FILE_PATH, JSON.stringify({}, null, 2));
+          }
+
+          const data = JSON.parse(fs.readFileSync(FILE_PATH, 'utf-8'));
+
+          const now = new Date();
+          const timestamp = now.toISOString().replace(/[:.]/g, '-');
+
+          // simulate processed images (you can refine this later)
+          const imagesDir = path.join(process.cwd(), 'images');
+          const files = fs.readdirSync(imagesDir).filter(f => f.endsWith('.webp'));
+
+          files.forEach(file => {
+            const key = timestamp + '-' + file;
+
+            data[key] = {
+              path: `images/${file}`,
+              name: file || `${timestamp}.webp`,
+              meta: {}
+            };
+          });
+
+          fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2));
+          console.log("files.json updated");
+          EOF
+
+      - name: Commit processed images + metadata
+        if: steps.changed.outputs.FILES != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add images
-          git commit -m "Add processed images" || echo "No changes"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add processed images + metadata"
+            git push
+          fi
