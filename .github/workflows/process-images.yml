@@ -48,7 +48,6 @@ jobs:
         run: |
           node process-images.js ${{ steps.changed.outputs.FILES }}
 
-      # 🔥 NEW STEP: update images/files.json
       - name: Update files.json
         if: steps.changed.outputs.FILES != ''
         run: |
@@ -65,25 +64,28 @@ jobs:
 
           const data = JSON.parse(fs.readFileSync(FILE_PATH, 'utf-8'));
 
-          const now = new Date();
-          const timestamp = now.toISOString().replace(/[:.]/g, '-');
+          const now = Date.now();
 
-          // simulate processed images (you can refine this later)
+          const repo = process.env.GITHUB_REPOSITORY;
+          const branch = process.env.GITHUB_REF_NAME;
+
+          const baseUrl = `https://raw.githubusercontent.com/${repo}/${branch}`;
+
           const imagesDir = path.join(process.cwd(), 'images');
           const files = fs.readdirSync(imagesDir).filter(f => f.endsWith('.webp'));
 
-          files.forEach(file => {
-            const key = timestamp + '-' + file;
+          files.forEach((file, index) => {
+            const key = now + index;
 
             data[key] = {
-              path: `images/${file}`,
-              name: file || `${timestamp}.webp`,
+              path: `${baseUrl}/images/${file}`,
+              name: file || `${now}.webp`,
               meta: {}
             };
           });
 
           fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2));
-          console.log("files.json updated");
+          console.log("files.json updated with full URLs");
           EOF
 
       - name: Commit processed images + metadata
