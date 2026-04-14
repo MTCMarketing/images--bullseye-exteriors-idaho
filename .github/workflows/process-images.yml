@@ -57,7 +57,6 @@ jobs:
 
           const FILE_PATH = path.join(process.cwd(), 'images', 'files.json');
 
-          // ensure file exists
           if (!fs.existsSync(FILE_PATH)) {
             fs.writeFileSync(FILE_PATH, JSON.stringify({}, null, 2));
           }
@@ -66,10 +65,11 @@ jobs:
 
           const now = Date.now();
 
-          const repo = process.env.GITHUB_REPOSITORY;
-          const branch = process.env.GITHUB_REF_NAME;
+          const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+          const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
+          const ownerLower = owner.toLowerCase();
 
-          const baseUrl = `https://raw.githubusercontent.com/${repo}/${branch}`;
+          const baseUrl = `https://${ownerLower}.github.io/${repo}`;
 
           const imagesDir = path.join(process.cwd(), 'images');
           const files = fs.readdirSync(imagesDir).filter(f => f.endsWith('.webp'));
@@ -85,7 +85,7 @@ jobs:
           });
 
           fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2));
-          console.log("files.json updated with full URLs");
+          console.log("files.json updated with GitHub Pages URLs");
           EOF
 
       - name: Commit processed images + metadata
